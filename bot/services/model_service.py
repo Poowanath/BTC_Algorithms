@@ -110,3 +110,15 @@ class ModelService:
 			"window_size": self.window_size,
 			"features": self.features,
 		}
+	def get_current_price(self) -> dict:
+		ticker = yf.Ticker("BTC-USD")
+		info = ticker.info
+		return {
+			"symbol": "BTC-USD",
+			"current_price": info.get("regularMarketPrice"),
+			"previous_close": info.get("regularMarketPreviousClose"),
+			"day_high": info.get("dayHigh"),
+			"day_low": info.get("dayLow"),
+			"volume": info.get("volume"),
+		}
+

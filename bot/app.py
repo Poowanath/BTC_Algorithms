@@ -146,11 +146,17 @@ def chat(req: ChatRequest) -> dict:
 			)
 			return {"intent": "signal", "answer": answer, "data": sig}
 
+		if "ราคา" in text or "price" in text:
+			price_data = model_service.get_current_price()
+			answer = f"ราคา BTC ตอนนี้: ${price_data['current_price']:,.2f}"
+			return {"intent": "price", "answer": answer, "data": price_data}
+
 		help_text = (
-			"Available commands: predict, compare, trend, mean, grid. "
-			"Example: 'compare' or 'trend'."
+			"Available commands: predict, compare, trend, mean, grid, price. "
+			"Example: 'compare' or 'price'."
 		)
 		return {"intent": "help", "answer": help_text}
+
 
 	except HTTPException:
 		raise
