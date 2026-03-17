@@ -1,17 +1,38 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Query
+import os
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Query, Request, Header
 from pydantic import BaseModel
+from linebot.v3 import WebhookHandler
+from linebot.v3.exceptions import InvalidSignatureError
+from linebot.v3.messaging import (
+    Configuration,
+    ApiClient,
+    MessagingApi,
+    ReplyMessageRequest,
+    TextMessage,
+)
+from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 from bot.services.model_service import ModelService
 from bot.services.strategy_service import StrategyService
 
+# Load environment variables
+load_dotenv()
 
 app = FastAPI(title="BTC Trading Bot API", version="1.0.0")
 DEFAULT_START_DATE = "2020-01-01"
 
 model_service = ModelService()
 strategy_service = StrategyService()
+
+# LINE Bot Configuration
+LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "1b0c561d8503a338ba218b62acbb3645")
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+
+configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 
 class ChatRequest(BaseModel):
@@ -162,3 +183,47 @@ def chat(req: ChatRequest) -> dict:
 		raise
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _process_chat_message(text: str, use_lstm_filter: bool = False) -> str:
+	"""Process chat message and return answer text."""
+	try:
+		req = ChatRequest(message=text, use_lstm_filter=use_lstm_filter)
+		result = chat(req)
+		return result["answer"]
+	except Exception as exc:
+		return f"เกิดข้อผิดพลาด: {str(exc)}"
+
+
+@app.post("/webhook")
+async def line_webhook(request: Request, x_line_signature: str = Header(None)):
+	"""LINE Bot webhook endpoint."""
+	body = await request.body()
+	body_str = body.decode("utf-8")
+
+	try:
+		handler.handle(body_str, x_line_signature)
+	except InvalidSignatureError:
+		raise HTTPException(status_code=400, detail="Invalid signature")
+
+	return "OK"
+
+
+@handler.add(MessageEvent, message=TextMessageContent)
+def handle_text_message(event: MessageEvent):
+	"""Handle text messages from LINE."""
+	if not LINE_CHANNEL_ACCESS_TOKEN:
+		return
+
+	user_message = event.message.text
+	reply_text = _process_chat_message(user_message, use_lstm_filter=False)
+
+	with ApiClient(configuration) as api_client:
+		line_bot_api = MessagingApi(api_client)
+		line_bot_api.reply_message_with_http_info(
+			ReplyMessageRequest(
+				reply_token=event.reply_token,
+				messages=[TextMessage(text=reply_text)]
+			)
+		)
+

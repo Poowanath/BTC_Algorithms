@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 .env
 .vscode/
+*.csv
+picture/
+Backup/

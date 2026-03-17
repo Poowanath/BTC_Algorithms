@@ -8,3 +8,5 @@ joblib
 tensorflow
 matplotlib
 scikit-learn
+line-bot-sdk
+python-dotenv
