@@ -210,7 +210,7 @@ def chat(req: ChatRequest) -> dict:
 						if cache_age > 0:
 							answer += f"\n(ข้อมูลเมื่อ {cache_age:.0f} นาทีที่แล้ว)"
 						else:
-							answer += "\n(ข้อมูลจาก cache)"
+							answer += ""
 				else:
 					answer = "ไม่สามารถดึงข้อมูลราคาได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง"
 				return {"intent": "price", "answer": answer, "data": price_data}
