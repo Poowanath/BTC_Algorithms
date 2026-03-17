@@ -204,19 +204,31 @@ def chat(req: ChatRequest) -> dict:
 			try:
 				price_data = model_service.get_current_price()
 				if price_data.get("current_price"):
-					answer = f"ราคา BTC ตอนนี้: ${price_data['current_price']:,.2f}"
+					answer = f"💰 ราคา BTC ตอนนี้: ${price_data['current_price']:,.2f}"
 					if price_data.get("cached"):
-						answer += " (ข้อมูลจาก cache)"
+						cache_age = price_data.get("cache_age_minutes", 0)
+						if cache_age > 0:
+							answer += f"\n(ข้อมูลเมื่อ {cache_age:.0f} นาทีที่แล้ว)"
+						else:
+							answer += "\n(ข้อมูลจาก cache)"
 				else:
 					answer = "ไม่สามารถดึงข้อมูลราคาได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง"
 				return {"intent": "price", "answer": answer, "data": price_data}
 			except Exception as e:
-				error_msg = str(e).lower()
-				if "rate limit" in error_msg or "too many requests" in error_msg:
-					answer = "กรุณารอสักครู่แล้วลองใหม่อีกครั้งในอีก 1-2 นาทีนะครับ"
-				else:
-					answer = f"ไม่สามารถดึงข้อมูลราคาได้ในขณะนี้ กรุณาลองใหม่ภายหลัง"
-				return {"intent": "price", "answer": answer}
+				# Fallback: ใช้ราคาจาก historical data แทน
+				try:
+					data = model_service.get_latest_btc_data(start=DEFAULT_START_DATE, include_current=False)
+					latest_price = float(data['Close'].iloc[-1])
+					latest_date = data.index[-1].strftime('%Y-%m-%d')
+					answer = f"💰 ราคา BTC: ${latest_price:,.2f}\n(ข้อมูล ณ {latest_date})"
+					return {"intent": "price", "answer": answer}
+				except Exception:
+					error_msg = str(e).lower()
+					if "rate limit" in error_msg or "too many requests" in error_msg:
+						answer = "⏳ กรุณารอสักครู่แล้วลองใหม่อีกครั้งในอีก 1-2 นาทีนะครับ"
+					else:
+						answer = "❌ ไม่สามารถดึงข้อมูลราคาได้ในขณะนี้ กรุณาลองใหม่ภายหลัง"
+					return {"intent": "price", "answer": answer}
 
 		help_text = (
 			" สามารถเรียกคำสั่งด้านล่างเพื่อดูข้อมูลได้:\n\n"
