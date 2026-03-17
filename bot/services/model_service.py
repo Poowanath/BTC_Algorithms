@@ -162,6 +162,35 @@ class ModelService:
 			return {**self._price_cache, "cached": True}
 		
 		try:
+			# Try method 1: Get latest minute data (more reliable)
+			btc_1m = yf.download("BTC-USD", period="1d", interval="1m", progress=False)
+			
+			if not btc_1m.empty:
+				if isinstance(btc_1m.columns, pd.MultiIndex):
+					btc_1m.columns = btc_1m.columns.get_level_values(0)
+				
+				latest = btc_1m.iloc[-1]
+				result = {
+					"symbol": "BTC-USD",
+					"current_price": float(latest['Close']),
+					"previous_close": float(btc_1m.iloc[-2]['Close']) if len(btc_1m) > 1 else float(latest['Close']),
+					"day_high": float(btc_1m['High'].max()),
+					"day_low": float(btc_1m['Low'].min()),
+					"volume": float(btc_1m['Volume'].sum()),
+					"cached": False,
+					"source": "1m_data"
+				}
+				
+				# Cache the result
+				self._price_cache = result
+				self._price_cache_time = now
+				
+				return result
+		except Exception:
+			pass  # Fall through to method 2
+		
+		try:
+			# Method 2: Use Ticker().info (original method)
 			ticker = yf.Ticker("BTC-USD")
 			info = ticker.info
 			
@@ -172,7 +201,8 @@ class ModelService:
 				"day_high": info.get("dayHigh"),
 				"day_low": info.get("dayLow"),
 				"volume": info.get("volume"),
-				"cached": False
+				"cached": False,
+				"source": "ticker_info"
 			}
 			
 			# Cache the result

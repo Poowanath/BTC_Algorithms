@@ -204,7 +204,7 @@ def chat(req: ChatRequest) -> dict:
 			try:
 				price_data = model_service.get_current_price()
 				if price_data.get("current_price"):
-					answer = f"💰 ราคา BTC ตอนนี้: ${price_data['current_price']:,.2f}"
+					answer = f"ราคา BTC ตอนนี้: ${price_data['current_price']:,.2f}"
 					if price_data.get("cached"):
 						cache_age = price_data.get("cache_age_minutes", 0)
 						if cache_age > 0:
@@ -220,14 +220,14 @@ def chat(req: ChatRequest) -> dict:
 					data = model_service.get_latest_btc_data(start=DEFAULT_START_DATE, include_current=False)
 					latest_price = float(data['Close'].iloc[-1])
 					latest_date = data.index[-1].strftime('%Y-%m-%d')
-					answer = f"💰 ราคา BTC: ${latest_price:,.2f}\n(ข้อมูล ณ {latest_date})"
+					answer = f"ราคา BTC: ${latest_price:,.2f}"
 					return {"intent": "price", "answer": answer}
 				except Exception:
 					error_msg = str(e).lower()
 					if "rate limit" in error_msg or "too many requests" in error_msg:
-						answer = "⏳ กรุณารอสักครู่แล้วลองใหม่อีกครั้งในอีก 1-2 นาทีนะครับ"
+						answer = "กรุณารอสักครู่แล้วลองใหม่อีกครั้งในอีก 1-2 นาทีนะครับ"
 					else:
-						answer = "❌ ไม่สามารถดึงข้อมูลราคาได้ในขณะนี้ กรุณาลองใหม่ภายหลัง"
+						answer = "ไม่สามารถดึงข้อมูลราคาได้ในขณะนี้ กรุณาลองใหม่ภายหลัง"
 					return {"intent": "price", "answer": answer}
 
 		help_text = (
