@@ -199,7 +199,7 @@ class FinalTester:
         # ลบกราฟ Drawdown ออกทั้งหมด
         
         plt.tight_layout()
-        filename = f'test_result_{strategy_name.replace(" ", "_")}.png'
+        filename = f'picture/test_result_{strategy_name.replace(" ", "_")}.png'
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         print(f"💾 บันทึกกราฟ: {filename}")
         plt.show()
@@ -278,8 +278,8 @@ class FinalTester:
         axes[1, 1].grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig('test_comparison_all_strategies.png', dpi=300, bbox_inches='tight')
-        print("\n บันทึกกราฟเปรียบเทียบ: test_comparison_all_strategies.png")
+        plt.savefig('picture/test_comparison_all_strategies.png', dpi=300, bbox_inches='tight')
+        print("\n💾 บันทึกกราฟเปรียบเทียบ: picture/test_comparison_all_strategies.png")
         plt.show()
 
 

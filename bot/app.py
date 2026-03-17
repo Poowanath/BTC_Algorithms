@@ -211,7 +211,11 @@ def chat(req: ChatRequest) -> dict:
 					answer = "ไม่สามารถดึงข้อมูลราคาได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง"
 				return {"intent": "price", "answer": answer, "data": price_data}
 			except Exception as e:
-				answer = f"ไม่สามารถดึงข้อมูลราคาได้: {str(e)}"
+				error_msg = str(e).lower()
+				if "rate limit" in error_msg or "too many requests" in error_msg:
+					answer = "กรุณารอสักครู่แล้วลองใหม่อีกครั้งในอีก 1-2 นาทีนะครับ"
+				else:
+					answer = f"ไม่สามารถดึงข้อมูลราคาได้ในขณะนี้ กรุณาลองใหม่ภายหลัง"
 				return {"intent": "price", "answer": answer}
 
 		help_text = (

@@ -32,10 +32,10 @@ class ModelService:
 		self._scaler_x = None
 		self._scaler_y = None
 		
-		# Cache for price data (5 minutes TTL)
+		# Cache for price data (15 minutes TTL)
 		self._price_cache = None
 		self._price_cache_time = None
-		self._cache_ttl_seconds = 300
+		self._cache_ttl_seconds = 900  # 15 minutes
 
 	def _resolve_path(self, relative_or_absolute: str) -> Path:
 		path = Path(relative_or_absolute)
@@ -159,7 +159,7 @@ class ModelService:
 		if (self._price_cache is not None and 
 		    self._price_cache_time is not None and
 		    (now - self._price_cache_time).total_seconds() < self._cache_ttl_seconds):
-			return self._price_cache
+			return {**self._price_cache, "cached": True}
 		
 		try:
 			ticker = yf.Ticker("BTC-USD")
@@ -172,6 +172,7 @@ class ModelService:
 				"day_high": info.get("dayHigh"),
 				"day_low": info.get("dayLow"),
 				"volume": info.get("volume"),
+				"cached": False
 			}
 			
 			# Cache the result
@@ -183,6 +184,12 @@ class ModelService:
 		except Exception as e:
 			# If rate limited and we have cache, return it even if expired
 			if self._price_cache is not None:
-				return {**self._price_cache, "cached": True, "note": "Using cached data due to rate limit"}
+				cache_age = (now - self._price_cache_time).total_seconds() / 60
+				return {
+					**self._price_cache, 
+					"cached": True, 
+					"cache_age_minutes": round(cache_age, 1),
+					"note": "Using cached data due to rate limit"
+				}
 			raise Exception(f"Unable to fetch price data: {str(e)}")
 
