@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -31,6 +31,11 @@ class ModelService:
 		self._model = None
 		self._scaler_x = None
 		self._scaler_y = None
+		
+		# Cache for price data (5 minutes TTL)
+		self._price_cache = None
+		self._price_cache_time = None
+		self._cache_ttl_seconds = 300
 
 	def _resolve_path(self, relative_or_absolute: str) -> Path:
 		path = Path(relative_or_absolute)
@@ -47,7 +52,7 @@ class ModelService:
 		if self._scaler_y is None:
 			self._scaler_y = joblib.load(self.scaler_y_path)
 
-	def get_latest_btc_data(self, start: str = "2020-01-01", days: int | None = None) -> pd.DataFrame:
+	def get_latest_btc_data(self, start: str = "2020-01-01", days: int | None = None, include_current: bool = False) -> pd.DataFrame:
 		if days is not None:
 			start_date = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
 		else:
@@ -61,6 +66,42 @@ class ModelService:
 
 		df = btc[["Open", "High", "Low", "Close", "Volume"]].copy()
 		df = df.ffill().dropna()
+		
+		# Add current real-time price as today's data if requested
+		if include_current:
+			try:
+				current_data = self.get_current_price()
+				if current_data.get("current_price"):
+					today = pd.Timestamp.now().normalize()
+					
+					# Check if today's data already exists
+					if today in df.index:
+						# Update today's Close price with real-time data
+						df.loc[today, "Close"] = current_data["current_price"]
+						if current_data.get("day_high"):
+							df.loc[today, "High"] = max(df.loc[today, "High"], current_data["day_high"])
+						if current_data.get("day_low"):
+							df.loc[today, "Low"] = min(df.loc[today, "Low"], current_data["day_low"])
+					else:
+						# Add new row for today
+						current_price = current_data["current_price"]
+						prev_close = current_data.get("previous_close", current_price)
+						day_high = current_data.get("day_high", current_price)
+						day_low = current_data.get("day_low", current_price)
+						
+						new_row = pd.DataFrame({
+							"Open": [prev_close],
+							"High": [day_high],
+							"Low": [day_low],
+							"Close": [current_price],
+							"Volume": [0]
+						}, index=[today])
+						
+						df = pd.concat([df, new_row])
+			except Exception:
+				# If real-time fetch fails, just use historical data
+				pass
+		
 		return df
 
 	def _add_features(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -111,14 +152,37 @@ class ModelService:
 			"features": self.features,
 		}
 	def get_current_price(self) -> dict:
-		ticker = yf.Ticker("BTC-USD")
-		info = ticker.info
-		return {
-			"symbol": "BTC-USD",
-			"current_price": info.get("regularMarketPrice"),
-			"previous_close": info.get("regularMarketPreviousClose"),
-			"day_high": info.get("dayHigh"),
-			"day_low": info.get("dayLow"),
-			"volume": info.get("volume"),
-		}
+		"""Get current BTC price with caching to avoid rate limits."""
+		now = datetime.now()
+		
+		# Return cached data if still valid
+		if (self._price_cache is not None and 
+		    self._price_cache_time is not None and
+		    (now - self._price_cache_time).total_seconds() < self._cache_ttl_seconds):
+			return self._price_cache
+		
+		try:
+			ticker = yf.Ticker("BTC-USD")
+			info = ticker.info
+			
+			result = {
+				"symbol": "BTC-USD",
+				"current_price": info.get("regularMarketPrice"),
+				"previous_close": info.get("regularMarketPreviousClose"),
+				"day_high": info.get("dayHigh"),
+				"day_low": info.get("dayLow"),
+				"volume": info.get("volume"),
+			}
+			
+			# Cache the result
+			self._price_cache = result
+			self._price_cache_time = now
+			
+			return result
+			
+		except Exception as e:
+			# If rate limited and we have cache, return it even if expired
+			if self._price_cache is not None:
+				return {**self._price_cache, "cached": True, "note": "Using cached data due to rate limit"}
+			raise Exception(f"Unable to fetch price data: {str(e)}")
 

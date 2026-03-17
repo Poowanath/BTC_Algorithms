@@ -4,11 +4,11 @@ API สำหรับ Trading Bot ที่ใช้ LSTM และกลยุ
 
 ## Features
 
-- 🤖 LINE Bot Integration
-- 📊 3 Trading Strategies: Trend Following, Mean Reversion, Grid Trading
-- 🧠 LSTM Model สำหรับพยากรณ์ราคา
-- 📈 Backtesting Engine
-- 🔄 Real-time BTC Price
+-  LINE Bot Integration
+-  3 Trading Strategies: Trend Following, Mean Reversion, Grid Trading
+-  LSTM Model สำหรับพยากรณ์ราคา
+-  Backtesting Engine
+-  Real-time BTC Price
 
 ## API Endpoints
 

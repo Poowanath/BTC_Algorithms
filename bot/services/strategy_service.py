@@ -40,6 +40,40 @@ class StrategyService:
 		if signal == -1:
 			return "SELL"
 		return "HOLD"
+	
+	@staticmethod
+	def _get_current_signal(strategy_name: str, latest_row: pd.Series, signals: pd.DataFrame) -> str:
+		"""Get current signal based on current market condition, not last trade."""
+		if strategy_name == "trend":
+			# Check if short MA > long MA (uptrend = BUY signal)
+			if latest_row['short_mavg'] > latest_row['long_mavg']:
+				return "BUY"
+			elif latest_row['short_mavg'] < latest_row['long_mavg']:
+				return "SELL"
+			return "HOLD"
+		
+		elif strategy_name in {"mean", "mean_reversion"}:
+			# Check if price is at oversold/overbought zone
+			price = latest_row['Close']
+			lower_band = latest_row['Lower_Band']
+			upper_band = latest_row['Upper_Band']
+			
+			if price <= lower_band:
+				return "BUY"  # Oversold
+			elif price >= upper_band:
+				return "SELL"  # Overbought
+			return "HOLD"
+		
+		elif strategy_name == "grid":
+			# For grid, use the actual signal since it's based on crossing thresholds
+			signal_value = int(latest_row['signal'])
+			if signal_value == 1:
+				return "BUY"
+			elif signal_value == -1:
+				return "SELL"
+			return "HOLD"
+		
+		return "HOLD"
 
 	def _apply_lstm_filter(self, signals: pd.DataFrame, model_service, full_data: pd.DataFrame) -> pd.DataFrame:
 		filtered = signals.copy()
@@ -107,14 +141,17 @@ class StrategyService:
 		portfolio, trades = backtest.run_backtest(signals)
 		metrics = backtest.calculate_metrics(portfolio, trades)
 
-		latest_signal_value = int(signals["signal"].iloc[-1])
+		# Get current signal based on strategy type
+		latest_row = signals.iloc[-1]
+		current_signal = self._get_current_signal(strategy_name, latest_row, signals)
+		
 		response = {
 			"strategy": label,
 			"params": params,
 			"use_lstm_filter": use_lstm_filter,
 			"latest_date": str(signals.index[-1].date()),
 			"latest_close": float(signals["Close"].iloc[-1]),
-			"latest_signal": self._signal_to_text(latest_signal_value),
+			"latest_signal": current_signal,
 			"metrics": {
 				"total_return_pct": float(metrics["Total Return (%)"]),
 				"buy_hold_return_pct": float(metrics["Buy & Hold Return (%)"]),

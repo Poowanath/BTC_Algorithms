@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import asyncio
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request, Header
 from pydantic import BaseModel
@@ -35,6 +37,27 @@ configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 
+# Keep-alive task to prevent Render from sleeping
+async def keep_alive():
+	"""Ping self every 10 minutes to prevent sleep on free tier."""
+	await asyncio.sleep(60)  # Wait 1 minute after startup
+	
+	while True:
+		try:
+			async with httpx.AsyncClient() as client:
+				await client.get("https://btc-algorithms.onrender.com/health", timeout=10.0)
+		except Exception:
+			pass  # Ignore errors
+		
+		await asyncio.sleep(600)  # 10 minutes
+
+
+@app.on_event("startup")
+async def startup_event():
+	"""Start background tasks on startup."""
+	asyncio.create_task(keep_alive())
+
+
 class ChatRequest(BaseModel):
 	message: str
 	use_lstm_filter: bool = False
@@ -54,6 +77,12 @@ def health() -> dict:
 	return {"status": "ok", "service": "btc-trading-bot"}
 
 
+@app.head("/health")
+def health_head():
+	"""HEAD endpoint for uptime monitoring."""
+	return
+
+
 @app.get("/predict")
 def predict() -> dict:
 	try:
@@ -66,12 +95,30 @@ def predict() -> dict:
 def signal(
 	strategy: str = Query("trend", description="trend | mean_reversion | grid"),
 	use_lstm_filter: bool = Query(False),
+	use_latest: bool = Query(True, description="Use latest real-time data instead of test split"),
 ) -> dict:
 	try:
-		data_full = model_service.get_latest_btc_data(start=DEFAULT_START_DATE)
-		data = _select_test_split(data_full)
-		if len(data) < 30:
-			raise ValueError("Not enough data in test split for configured date range.")
+		data_full = model_service.get_latest_btc_data(start=DEFAULT_START_DATE, include_current=use_latest)
+		
+		if use_latest:
+			# Use all available data for real-time signal
+			data = data_full
+			data_scope = {
+				"mode": "real_time",
+				"start_date": DEFAULT_START_DATE,
+				"total_rows": len(data),
+			}
+		else:
+			# Use test split for backtesting
+			data = _select_test_split(data_full)
+			if len(data) < 30:
+				raise ValueError("Not enough data in test split for configured date range.")
+			data_scope = {
+				"mode": "60/20/20_test_split",
+				"start_date": DEFAULT_START_DATE,
+				"full_rows": len(data_full),
+				"test_rows": len(data),
+			}
 
 		result = strategy_service.run_strategy(
 			name=strategy,
@@ -79,12 +126,7 @@ def signal(
 			use_lstm_filter=use_lstm_filter,
 			model_service=model_service if use_lstm_filter else None,
 		)
-		result["data_scope"] = {
-			"mode": "60/20/20_test_split",
-			"start_date": DEFAULT_START_DATE,
-			"full_rows": len(data_full),
-			"test_rows": len(data),
-		}
+		result["data_scope"] = data_scope
 		return result
 	except ValueError as exc:
 		raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -144,37 +186,42 @@ def chat(req: ChatRequest) -> dict:
 			return {"intent": "compare", "answer": answer, "data": cmp_data}
 
 		if "trend" in text:
-			sig = signal(strategy="trend", use_lstm_filter=req.use_lstm_filter)
-			answer = (
-				f"Trend Following signal: {sig['latest_signal']} at "
-				f"${sig['latest_close']:,.2f}."
-			)
+			sig = signal(strategy="trend", use_lstm_filter=req.use_lstm_filter, use_latest=True)
+			answer = f"Trend Following\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคา: ${sig['latest_close']:,.2f}"
 			return {"intent": "signal", "answer": answer, "data": sig}
 
 		if "mean" in text:
-			sig = signal(strategy="mean_reversion", use_lstm_filter=req.use_lstm_filter)
-			answer = (
-				f"Mean Reversion signal: {sig['latest_signal']} at "
-				f"${sig['latest_close']:,.2f}."
-			)
+			sig = signal(strategy="mean_reversion", use_lstm_filter=req.use_lstm_filter, use_latest=True)
+			answer = f"Mean Reversion\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคา: ${sig['latest_close']:,.2f}"
 			return {"intent": "signal", "answer": answer, "data": sig}
 
 		if "grid" in text:
-			sig = signal(strategy="grid", use_lstm_filter=req.use_lstm_filter)
-			answer = (
-				f"Grid Trading signal: {sig['latest_signal']} at "
-				f"${sig['latest_close']:,.2f}."
-			)
+			sig = signal(strategy="grid", use_lstm_filter=req.use_lstm_filter, use_latest=True)
+			answer = f"Grid Trading\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคา: ${sig['latest_close']:,.2f}"
 			return {"intent": "signal", "answer": answer, "data": sig}
 
 		if "ราคา" in text or "price" in text:
-			price_data = model_service.get_current_price()
-			answer = f"ราคา BTC ตอนนี้: ${price_data['current_price']:,.2f}"
-			return {"intent": "price", "answer": answer, "data": price_data}
+			try:
+				price_data = model_service.get_current_price()
+				if price_data.get("current_price"):
+					answer = f"ราคา BTC ตอนนี้: ${price_data['current_price']:,.2f}"
+					if price_data.get("cached"):
+						answer += " (ข้อมูลจาก cache)"
+				else:
+					answer = "ไม่สามารถดึงข้อมูลราคาได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง"
+				return {"intent": "price", "answer": answer, "data": price_data}
+			except Exception as e:
+				answer = f"ไม่สามารถดึงข้อมูลราคาได้: {str(e)}"
+				return {"intent": "price", "answer": answer}
 
 		help_text = (
-			"Available commands: predict, compare, trend, mean, grid, price. "
-			"Example: 'compare' or 'price'."
+			" สามารถเรียกคำสั่งด้านล่างเพื่อดูข้อมูลได้:\n\n"
+			" ราคา/price - ดูราคา BTC ปัจจุบัน\n"
+			" predict/พยากรณ์ - พยากรณ์ราคาวันถัดไป\n"
+			" compare/เปรียบเทียบ - เปรียบเทียบกลยุทธ์ทั้งหมด\n"
+			" trend - สัญญาณ Trend Following\n"
+			" mean - สัญญาณ Mean Reversion\n"
+			" grid - สัญญาณ Grid Trading"
 		)
 		return {"intent": "help", "answer": help_text}
 

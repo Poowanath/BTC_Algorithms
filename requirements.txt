@@ -10,3 +10,4 @@ matplotlib
 scikit-learn
 line-bot-sdk
 python-dotenv
+httpx
