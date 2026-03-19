@@ -17,7 +17,6 @@ from linebot.v3.messaging import (
     URIAction,
 )
 
-
 def create_rich_menu(channel_access_token: str) -> str:
     """
     สร้าง Rich Menu สำหรับ BTC Trading Bot
