@@ -1,61 +1,54 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
-import joblib
 import pandas as pd
 import yfinance as yf
-from tensorflow.keras.models import load_model
+import torch
+import numpy as np
+import random
+from chronos import ChronosPipeline
 
 
-class ModelService:
-	"""Serve predictions from the same LSTM setup used in the project."""
+# ตั้ง seed สำหรับ reproducibility
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+	torch.cuda.manual_seed_all(SEED)
+
+
+class ChronosService:
+	"""Serve predictions using Chronos model."""
 
 	def __init__(
 		self,
-		model_path: str = "Model/lstm_2layer_btc.keras",
-		scaler_x_path: str = "Model/scaler_X.pkl",
-		scaler_y_path: str = "Model/scaler_y.pkl",
-		window_size: int = 20,
+		model_name: str = "amazon/chronos-t5-tiny",
+		window_size: int = 256
 	) -> None:
-		self.project_root = Path(__file__).resolve().parents[2]
-		self.model_path = self._resolve_path(model_path)
-		self.scaler_x_path = self._resolve_path(scaler_x_path)
-		self.scaler_y_path = self._resolve_path(scaler_y_path)
-
+		self.model_name = model_name
 		self.window_size = window_size
-		self.features = ["Close", "Return", "Range", "Body"]
-
-		self._model = None
-		self._scaler_x = None
-		self._scaler_y = None
+		self._pipeline = None
 		
 		# Cache for price data (10 minutes TTL)
 		self._price_cache = None
 		self._price_cache_time = None
-		self._cache_ttl_seconds = 600  # 10 minutes
-
-	def _resolve_path(self, relative_or_absolute: str) -> Path:
-		path = Path(relative_or_absolute)
-		return path if path.is_absolute() else self.project_root / path
+		self._cache_ttl_seconds = 600
 
 	def _ensure_loaded(self) -> None:
-		if self._model is None:
-			try:
-				self._model = load_model(str(self.model_path), compile=False)
-			except (TypeError, ValueError):
-				self._model = load_model(str(self.model_path), compile=False, safe_mode=False)
-			self._model.compile(optimizer="adam", loss="mse")
+		if self._pipeline is None:
+			print(f"🤖 Loading Chronos model: {self.model_name}...")
+			self._pipeline = ChronosPipeline.from_pretrained(
+				self.model_name,
+				device_map="cpu",
+				torch_dtype=torch.float32
+			)
+			print("✅ Chronos model loaded")
 
-		if self._scaler_x is None:
-			self._scaler_x = joblib.load(self.scaler_x_path)
-
-		if self._scaler_y is None:
-			self._scaler_y = joblib.load(self.scaler_y_path)
-
-	def get_latest_btc_data(self, start: str = "2020-01-01", days: int | None = None, include_current: bool = False) -> pd.DataFrame:
+	def get_latest_btc_data(self, start: str = "2020-01-01", days: int | None = None) -> pd.DataFrame:
 		if days is not None:
 			start_date = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
 		else:
@@ -67,75 +60,44 @@ class ModelService:
 		if isinstance(btc.columns, pd.MultiIndex):
 			btc.columns = btc.columns.get_level_values(0)
 
-		df = btc[["Open", "High", "Low", "Close", "Volume"]].copy()
+		df = btc[["Close"]].copy()
 		df = df.ffill().dropna()
 		
-		# Add current real-time price as today's data if requested
-		if include_current:
-			try:
-				current_data = self.get_current_price()
-				if current_data.get("current_price"):
-					today = pd.Timestamp.now().normalize()
-					
-					# Check if today's data already exists
-					if today in df.index:
-						# Update today's Close price with real-time data
-						df.loc[today, "Close"] = current_data["current_price"]
-						if current_data.get("day_high"):
-							df.loc[today, "High"] = max(df.loc[today, "High"], current_data["day_high"])
-						if current_data.get("day_low"):
-							df.loc[today, "Low"] = min(df.loc[today, "Low"], current_data["day_low"])
-					else:
-						# Add new row for today
-						current_price = current_data["current_price"]
-						prev_close = current_data.get("previous_close", current_price)
-						day_high = current_data.get("day_high", current_price)
-						day_low = current_data.get("day_low", current_price)
-						
-						new_row = pd.DataFrame({
-							"Open": [prev_close],
-							"High": [day_high],
-							"Low": [day_low],
-							"Close": [current_price],
-							"Volume": [0]
-						}, index=[today])
-						
-						df = pd.concat([df, new_row])
-			except Exception:
-				# If real-time fetch fails, just use historical data
-				pass
-		
 		return df
-
-	def _add_features(self, data: pd.DataFrame) -> pd.DataFrame:
-		df = data.copy()
-		df["Return"] = df["Close"].pct_change()
-		df["Range"] = df["High"] - df["Low"]
-		df["Body"] = df["Close"] - df["Open"]
-		df["Target"] = df["Close"].shift(-1)
-		return df.dropna()
 
 	def predict_from_dataframe(self, data: pd.DataFrame) -> Optional[float]:
 		self._ensure_loaded()
 
-		df = self._add_features(data)
-		if len(df) < self.window_size:
-			return None
+		if len(data) < self.window_size:
+			print(f"⚠️ Warning: Not enough data. Need {self.window_size}, got {len(data)}")
+			context = data['Close'].values.tolist()
+		else:
+			context = data['Close'].values[-self.window_size:].tolist()
 
-		# Use numpy input to match how scaler was originally fitted.
-		x_scaled = self._scaler_x.transform(df[self.features].to_numpy())
-		x_scaled = pd.DataFrame(x_scaled, columns=self.features, index=df.index)
+		# Chronos-T5 ใช้ list และ wrap ใน list
+		context_tensor = torch.tensor([context])
 
-		last_sequence = x_scaled.iloc[-self.window_size :].values
-		x_input = last_sequence.reshape(1, self.window_size, len(self.features))
+		# ตั้ง seed ก่อน predict เพื่อให้ได้ผลลัพธ์เหมือนเดิม
+		torch.manual_seed(SEED)
+		if torch.cuda.is_available():
+			torch.cuda.manual_seed_all(SEED)
 
-		pred_scaled = self._model.predict(x_input, verbose=0)
-		pred_price = self._scaler_y.inverse_transform(pred_scaled)[0][0]
-		return float(pred_price)
+		with torch.no_grad():
+			forecast = self._pipeline.predict(
+				context_tensor,
+				prediction_length=1,
+				num_samples=1  # ใช้ 1 sample เพื่อความเร็วและ deterministic
+			)
+
+		# forecast shape: [batch_size, num_samples, prediction_length]
+		# ใช้ sample เดียว
+		predicted_price = forecast[0, 0, 0].item()
+		return float(predicted_price)
 
 	def predict_next_day(self) -> dict:
 		data = self.get_latest_btc_data()
 		predicted_price = self.predict_from_dataframe(data)
+		
 		if predicted_price is None:
 			raise ValueError("Not enough data for prediction")
 
@@ -154,36 +116,39 @@ class ModelService:
 			"last_close": last_close,
 			"predicted_close": float(predicted_price),
 			"predicted_change_pct": float(change_pct),
+			"model": self.model_name,
 			"window_size": self.window_size,
-			"features": self.features,
 			"accuracy": accuracy_metrics
 		}
 	
 	def _calculate_historical_accuracy(self, data: pd.DataFrame, test_days: int = 30) -> dict:
 		"""Calculate historical accuracy of the model on recent data."""
 		try:
-			if len(data) < test_days + self.window_size + 1:
-				return {"available": False, "reason": "Not enough data"}
-			
-			# Use last N days for testing
-			test_data = data.iloc[-(test_days + 1):].copy()
+			# ต้องมีข้อมูลเพียงพอสำหรับ window + test period
+			min_required = self.window_size + test_days + 1
+			if len(data) < min_required:
+				return {"available": False, "reason": f"Not enough data (need {min_required}, got {len(data)})"}
 			
 			correct_direction = 0
 			total_predictions = 0
 			errors = []
 			
-			for i in range(len(test_data) - 1):
-				# Get data up to day i
-				historical = data.iloc[:-(test_days - i + 1)]
+			# ทดสอบย้อนหลัง test_days วัน
+			for i in range(test_days):
+				# ใช้ข้อมูลจนถึงวันที่ -(test_days - i + 1)
+				# เช่น i=0 → ใช้ถึง -(31), i=1 → ใช้ถึง -(30), ..., i=29 → ใช้ถึง -(2)
+				end_idx = -(test_days - i + 1)
+				historical = data.iloc[:end_idx] if end_idx != -1 else data.iloc[:]
 				
 				# Predict next day
 				predicted = self.predict_from_dataframe(historical)
 				if predicted is None:
 					continue
 				
-				# Get actual price
-				actual = float(test_data.iloc[i + 1]['Close'])
-				current = float(test_data.iloc[i]['Close'])
+				# Get actual price (วันถัดไป)
+				actual_idx = -(test_days - i)
+				actual = float(data.iloc[actual_idx]['Close'])
+				current = float(data.iloc[end_idx]['Close'])
 				
 				# Check direction accuracy
 				predicted_direction = 1 if predicted > current else -1
@@ -212,10 +177,12 @@ class ModelService:
 				"correct_predictions": correct_direction
 			}
 			
-		except Exception:
-			return {"available": False, "reason": "Calculation error"}
+		except Exception as e:
+			return {"available": False, "reason": f"Calculation error: {str(e)}"}
+
 	def get_current_price(self) -> dict:
-		"""Get current BTC price with caching to avoid rate limits."""
+		"""Get current BTC price (reuse from ModelService)"""
+		from datetime import datetime
 		now = datetime.now()
 		
 		# Return cached data if still valid
@@ -229,7 +196,6 @@ class ModelService:
 			return result
 		
 		try:
-			# Try method 1: Get latest minute data (more reliable)
 			btc_1m = yf.download("BTC-USD", period="1d", interval="1m", progress=False)
 			
 			if not btc_1m.empty:
@@ -237,7 +203,6 @@ class ModelService:
 					btc_1m.columns = btc_1m.columns.get_level_values(0)
 				
 				latest = btc_1m.iloc[-1]
-				# Use the actual data timestamp from the index
 				data_timestamp = btc_1m.index[-1].to_pydatetime()
 				
 				result = {
@@ -252,16 +217,14 @@ class ModelService:
 					"data_time": data_timestamp
 				}
 				
-				# Cache the result
 				self._price_cache = result
 				self._price_cache_time = now
 				
 				return result
 		except Exception:
-			pass  # Fall through to method 2
+			pass
 		
 		try:
-			# Method 2: Use Ticker().info (original method)
 			ticker = yf.Ticker("BTC-USD")
 			info = ticker.info
 			
@@ -277,14 +240,12 @@ class ModelService:
 				"data_time": now
 			}
 			
-			# Cache the result
 			self._price_cache = result
 			self._price_cache_time = now
 			
 			return result
 			
 		except Exception as e:
-			# If rate limited and we have cache, return it even if expired
 			if self._price_cache is not None:
 				cache_age = (now - self._price_cache_time).total_seconds() / 60
 				return {
@@ -295,4 +256,3 @@ class ModelService:
 					"data_time": self._price_cache_time
 				}
 			raise Exception(f"Unable to fetch price data: {str(e)}")
-

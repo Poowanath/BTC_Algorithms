@@ -322,30 +322,60 @@ class AlgorithmsWithChronos:
                                           label=label)
 
         
-        # แสดง Buy/Sell signals
+        # Buy/Sell signals พร้อมไฮไลท์กำไร/ขาดทุน
         if not trades.empty:
-            buy_trades = trades[trades['action'] == 'BUY']
-            sell_trades = trades[trades['action'] == 'SELL']
+            buy_trades = trades[trades['action'] == 'BUY'].reset_index(drop=True)
+            sell_trades = trades[trades['action'] == 'SELL'].reset_index(drop=True)
             
-            if len(buy_trades) > 0:
-                axes[0].scatter(buy_trades['date'], 
-                              [portfolio.loc[portfolio.index == d, 'price'].iloc[0] 
-                               for d in buy_trades['date']], 
-                              marker='^', color='green', s=200, 
-                              label='BUY', zorder=5, edgecolors='darkgreen', linewidths=2)
+            # จับคู่ BUY→SELL เพื่อคำนวณกำไร/ขาดทุน
+            num_pairs = min(len(buy_trades), len(sell_trades))
             
-            if len(sell_trades) > 0:
-                axes[0].scatter(sell_trades['date'], 
-                              [portfolio.loc[portfolio.index == d, 'price'].iloc[0] 
-                               for d in sell_trades['date']], 
-                              marker='v', color='red', s=200, 
-                              label='SELL', zorder=5, edgecolors='darkred', linewidths=2)
+            buy_shown = False
+            sell_shown = False
+            
+            for i in range(num_pairs):
+                buy_val = buy_trades.loc[i, 'value']
+                sell_val = sell_trades.loc[i, 'cash_after']
+                is_profit = sell_val > buy_val
+                
+                # พื้นหลัง: เขียวอ่อน = กำไร, แดงอ่อน = ขาดทุน
+                bg_color = '#66BB6A' if is_profit else '#EF5350'
+                
+                buy_date = buy_trades.loc[i, 'date']
+                sell_date = sell_trades.loc[i, 'date']
+                buy_price = portfolio.loc[portfolio.index == buy_date, 'price'].iloc[0]
+                sell_price = portfolio.loc[portfolio.index == sell_date, 'price'].iloc[0]
+                
+                # ระบายสีพื้นหลังระหว่าง buy→sell
+                axes[0].axvspan(buy_date, sell_date, alpha=0.10, color=bg_color)
+                
+                # BUY marker (เขียวเสมอ)
+                label_buy = 'BUY' if not buy_shown else None
+                buy_shown = True
+                axes[0].scatter(buy_date, buy_price, marker='^', color='green', s=200,
+                              label=label_buy, zorder=5, edgecolors='darkgreen', linewidths=2)
+                
+                # SELL marker (แดงเสมอ)
+                label_sell = 'SELL' if not sell_shown else None
+                sell_shown = True
+                axes[0].scatter(sell_date, sell_price, marker='v', color='red', s=200,
+                              label=label_sell, zorder=5, edgecolors='darkred', linewidths=2)
+            
+            # BUY ที่ยังไม่มี SELL คู่ (ถือค้างอยู่)
+            if len(buy_trades) > num_pairs:
+                for i in range(num_pairs, len(buy_trades)):
+                    bd = buy_trades.loc[i, 'date']
+                    bp = portfolio.loc[portfolio.index == bd, 'price'].iloc[0]
+                    label = 'BUY' if not buy_shown else None
+                    buy_shown = True
+                    axes[0].scatter(bd, bp, marker='^', color='green', s=200,
+                                  label=label, zorder=5, edgecolors='darkgreen', linewidths=2)
         
         axes[0].set_title(f'{strategy_name}: Price & Signals (Test Set with Chronos Prediction)', 
                          fontsize=14, fontweight='bold')
         axes[0].set_ylabel('Price ($)', fontsize=12)
         axes[0].legend(loc='best', fontsize=9)
-        axes[0].grid(True, alpha=0.3)
+        axes[0].grid(False)
         
         # 2. Portfolio Value
         axes[1].plot(portfolio.index, portfolio['total_value'], 
@@ -353,20 +383,29 @@ class AlgorithmsWithChronos:
         axes[1].axhline(y=10000, color='gray', linestyle='--', 
                        alpha=0.5, label='Initial Capital')
         
-        # ระบายสีช่วงที่ถือ BTC
-        btc_periods = portfolio[portfolio['position'] == 'BTC']
-        if len(btc_periods) > 0:
-            for i in range(len(btc_periods)):
-                if i == 0 or (btc_periods.index[i] - btc_periods.index[i-1]).days > 1:
-                    axes[1].axvspan(btc_periods.index[i], 
-                                   btc_periods.index[min(i+1, len(btc_periods)-1)], 
-                                   alpha=0.2, color='green')
+        # ระบายสีช่วงที่ถือ BTC ตามกำไร/ขาดทุน
+        if not trades.empty:
+            buy_tr = trades[trades['action'] == 'BUY'].reset_index(drop=True)
+            sell_tr = trades[trades['action'] == 'SELL'].reset_index(drop=True)
+            n_pairs = min(len(buy_tr), len(sell_tr))
+            
+            for i in range(n_pairs):
+                b_val = buy_tr.loc[i, 'value']
+                s_val = sell_tr.loc[i, 'cash_after']
+                c = '#66BB6A' if s_val > b_val else '#EF5350'
+                axes[1].axvspan(buy_tr.loc[i, 'date'], sell_tr.loc[i, 'date'],
+                               alpha=0.15, color=c)
+            
+            # ช่วงที่ยังถือค้าง
+            if len(buy_tr) > n_pairs:
+                axes[1].axvspan(buy_tr.loc[n_pairs, 'date'], portfolio.index[-1],
+                               alpha=0.15, color='#FFA726')
         
         axes[1].set_title('Portfolio Value Over Time (Test Set)', fontsize=14, fontweight='bold')
         axes[1].set_ylabel('Value ($)', fontsize=12)
         axes[1].set_xlabel('Date', fontsize=12)
         axes[1].legend()
-        axes[1].grid(True, alpha=0.3)
+        axes[1].grid(False)
         
         # สรุปข้อมูลในกราฟ
         info_text = f"Return: {metrics['Total Return (%)']:.2f}%\n"
@@ -380,7 +419,11 @@ class AlgorithmsWithChronos:
                     bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
         
         plt.tight_layout()
-        filename = f'with_chronos_{strategy_name.replace(" ", "_")}.png'
+        
+        # สร้างโฟลเดอร์ picture ถ้ายังไม่มี
+        os.makedirs('picture', exist_ok=True)
+        
+        filename = f'picture/with_chronos_{strategy_name.replace(" ", "_")}.png'
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         print(f"💾 บันทึกกราฟ: {filename}")
         plt.show()
@@ -529,5 +572,9 @@ if __name__ == "__main__":
     
     # เปรียบเทียบทั้งหมด
     comparison_df = algo_tester.compare_all_strategies(results)
+    
+    # บันทึกผลลัพธ์เป็น CSV
+    comparison_df.to_csv('results_with_chronos.csv', index=False)
+    print("\n💾 บันทึกผลลัพธ์: results_with_chronos.csv")
     
     print("✅ เสร็จสิ้นการทดสอบทั้งหมด!")

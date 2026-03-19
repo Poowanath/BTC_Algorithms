@@ -8,7 +8,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
-def predict_next_day(data=None, model_path='Model/lstm_2layer_btc.keras',
+def predict_next_day(data=None, model_path='Model/lstm_1layer_btc.keras',
                      scalerX_path='Model/scaler_X.pkl',
                      scalerY_path='Model/scaler_y.pkl'):
     """
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     try:
         predicted_price = predict_next_day(
             data=None,
-            model_path='lstm_2layer_btc.keras',
+            model_path='lstm_1layer_btc.keras',
             scalerX_path='scaler_X.pkl',
             scalerY_path='scaler_y.pkl'
         )

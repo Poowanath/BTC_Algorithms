@@ -60,7 +60,12 @@ class AlgorithmsWithLSTM:
         # Load model & scalers
         # =========================
         print("\n🤖 Loading LSTM model...")
-        self.model = load_model(model_path, compile=False)
+        try:
+            self.model = load_model(model_path, compile=False)
+        except (TypeError, ValueError) as e:
+            print(f"⚠️ Warning: {e}")
+            print("🔄 Trying to load with safe_mode=False...")
+            self.model = load_model(model_path, compile=False, safe_mode=False)
         self.model.compile(optimizer="adam", loss="mse")
 
         self.scaler_X = joblib.load(scalerX_path)
@@ -649,5 +654,9 @@ if __name__ == "__main__":
     
     # เปรียบเทียบทั้งหมด
     comparison_df = algo_tester.compare_all_strategies(results)
+    
+    # บันทึกผลลัพธ์เป็น CSV
+    comparison_df.to_csv('results_with_lstm.csv', index=False)
+    print("\n💾 บันทึกผลลัพธ์: results_with_lstm.csv")
     
     print("✅ เสร็จสิ้นการทดสอบทั้งหมด!")

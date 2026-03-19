@@ -18,6 +18,9 @@ class BacktestEngine:
     
     def run_backtest(self, signals):
         """รัน Backtest แบบ All-in/All-out"""
+        # ลบแถวที่มี NaN ใน Close price ก่อน
+        signals = signals.dropna(subset=['Close'])
+        
         portfolio = pd.DataFrame(index=signals.index)
         portfolio['price'] = signals['Close']
         portfolio['signal'] = signals['signal']
@@ -89,11 +92,15 @@ class BacktestEngine:
                 current_btc = 0.0
                 current_position = 'CASH'
             
-            # บันทึกสถานะ - ใช้ .iloc แทน .loc
-            portfolio.iloc[i, portfolio.columns.get_loc('cash')] = float(current_cash)
-            portfolio.iloc[i, portfolio.columns.get_loc('btc_holdings')] = float(current_btc)
-            portfolio.iloc[i, portfolio.columns.get_loc('btc_value')] = float(current_btc * current_price)
-            portfolio.iloc[i, portfolio.columns.get_loc('total_value')] = float(current_cash + (current_btc * current_price))
+            # บันทึกสถานะ - ใช้ .iloc แทน .loc และตรวจสอบ NaN
+            portfolio.iloc[i, portfolio.columns.get_loc('cash')] = float(current_cash) if not np.isnan(current_cash) else 0.0
+            portfolio.iloc[i, portfolio.columns.get_loc('btc_holdings')] = float(current_btc) if not np.isnan(current_btc) else 0.0
+            
+            btc_value = float(current_btc * current_price)
+            total_value = float(current_cash + (current_btc * current_price))
+            
+            portfolio.iloc[i, portfolio.columns.get_loc('btc_value')] = btc_value if not np.isnan(btc_value) else 0.0
+            portfolio.iloc[i, portfolio.columns.get_loc('total_value')] = total_value if not np.isnan(total_value) else self.initial_capital
             portfolio.iloc[i, portfolio.columns.get_loc('position')] = current_position
         
         trades_df = pd.DataFrame(trades) if trades else pd.DataFrame()

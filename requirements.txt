@@ -11,3 +11,6 @@ scikit-learn
 line-bot-sdk
 python-dotenv
 httpx
+pytz
+torch
+chronos-forecasting

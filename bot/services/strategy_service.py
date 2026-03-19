@@ -76,7 +76,9 @@ class StrategyService:
 		return "HOLD"
 
 	def _apply_lstm_filter(self, signals: pd.DataFrame, model_service, full_data: pd.DataFrame) -> pd.DataFrame:
+		"""Apply Chronos model filter to trading signals."""
 		filtered = signals.copy()
+		filtered_count = 0
 
 		for i in range(len(filtered)):
 			signal = int(filtered["signal"].iloc[i])
@@ -94,12 +96,24 @@ class StrategyService:
 			price_will_go_up = predicted > current_price
 			if signal == 1 and not price_will_go_up:
 				filtered.loc[current_date, "signal"] = 0
+				filtered_count += 1
 			elif signal == -1 and price_will_go_up:
 				filtered.loc[current_date, "signal"] = 0
-
+				filtered_count += 1
+		
 		return filtered
 
-	def run_strategy(self, name: str, data: pd.DataFrame, use_lstm_filter: bool = False, model_service=None) -> Dict:
+	def run_strategy(self, name: str, data: pd.DataFrame, use_model_filter: bool = False, model_service=None, full_data: pd.DataFrame = None) -> Dict:
+		"""
+		Run strategy with optional Chronos filter.
+		
+		Args:
+			name: Strategy name
+			data: Test data for backtesting
+			use_model_filter: Whether to use Chronos filter
+			model_service: Model service for filtering
+			full_data: Full dataset (train+val+test) for Chronos filter to have enough data
+		"""
 		strategy_name = name.strip().lower()
 
 		if strategy_name == "trend":
@@ -132,10 +146,12 @@ class StrategyService:
 		else:
 			raise ValueError("strategy must be one of: trend, mean_reversion, grid")
 
-		if use_lstm_filter:
+		if use_model_filter:
 			if model_service is None:
-				raise ValueError("model_service is required when use_lstm_filter=True")
-			signals = self._apply_lstm_filter(signals, model_service, data)
+				raise ValueError("model_service is required when use_model_filter=True")
+			# ใช้ full_data สำหรับ Chronos filter เพื่อให้มีข้อมูลพอ
+			filter_data = full_data if full_data is not None else data
+			signals = self._apply_lstm_filter(signals, model_service, filter_data)
 
 		backtest = BacktestEngine(initial_capital=10000, commission=0.001)
 		portfolio, trades = backtest.run_backtest(signals)
@@ -145,12 +161,37 @@ class StrategyService:
 		latest_row = signals.iloc[-1]
 		current_signal = self._get_current_signal(strategy_name, latest_row, signals)
 		
+		# Get current price from model_service (intraday data), otherwise use historical data
+		if model_service is not None:
+			try:
+				# ใช้ intraday data เหมือนกับที่ใช้ในกราฟ
+				import yfinance as yf
+				ticker = yf.Ticker("BTC-USD")
+				intraday_data = ticker.history(period="1d", interval="5m")
+				
+				if len(intraday_data) > 0:
+					latest_close = float(intraday_data['Close'].iloc[-1])
+					latest_time = intraday_data.index[-1]
+					latest_date_str = str(latest_time.date())
+				else:
+					# Fallback to get_current_price
+					price_data = model_service.get_current_price()
+					latest_close = float(price_data.get("current_price", signals["Close"].iloc[-1]))
+					latest_date_str = str(price_data.get("data_time", signals.index[-1]).date() if hasattr(price_data.get("data_time", signals.index[-1]), 'date') else signals.index[-1].date())
+			except Exception:
+				# Fallback to historical data
+				latest_close = float(signals["Close"].iloc[-1])
+				latest_date_str = str(signals.index[-1].date())
+		else:
+			latest_close = float(signals["Close"].iloc[-1])
+			latest_date_str = str(signals.index[-1].date())
+		
 		response = {
 			"strategy": label,
 			"params": params,
-			"use_lstm_filter": use_lstm_filter,
-			"latest_date": str(signals.index[-1].date()),
-			"latest_close": float(signals["Close"].iloc[-1]),
+			"use_model_filter": use_model_filter,
+			"latest_date": latest_date_str,
+			"latest_close": latest_close,
 			"latest_signal": current_signal,
 			"metrics": {
 				"total_return_pct": float(metrics["Total Return (%)"]),
@@ -164,11 +205,24 @@ class StrategyService:
 		}
 		return response
 
-	def compare_all(self, data: pd.DataFrame, use_lstm_filter: bool = False, model_service=None) -> Dict:
+	def compare_all(self, data: pd.DataFrame, use_model_filter: bool = False, model_service=None, full_data: pd.DataFrame = None) -> Dict:
+		"""
+		Compare all strategies.
+		
+		Args:
+			data: Test data for backtesting
+			use_model_filter: Whether to use Chronos filter
+			model_service: Model service for filtering
+			full_data: Full dataset (train+val+test) for Chronos filter to have enough data
+		"""
+		# ถ้าไม่มี full_data ให้ใช้ data แทน
+		if full_data is None:
+			full_data = data
+			
 		results = {
-			"trend": self.run_strategy("trend", data, use_lstm_filter, model_service),
-			"mean_reversion": self.run_strategy("mean_reversion", data, use_lstm_filter, model_service),
-			"grid": self.run_strategy("grid", data, use_lstm_filter, model_service),
+			"trend": self.run_strategy("trend", data, use_model_filter, model_service, full_data),
+			"mean_reversion": self.run_strategy("mean_reversion", data, use_model_filter, model_service, full_data),
+			"grid": self.run_strategy("grid", data, use_model_filter, model_service, full_data),
 		}
 
 		ranking = sorted(
@@ -185,7 +239,7 @@ class StrategyService:
 		)
 
 		return {
-			"use_lstm_filter": use_lstm_filter,
+			"use_model_filter": use_model_filter,
 			"best_strategy": ranking[0],
 			"ranking": ranking,
 			"results": results,
