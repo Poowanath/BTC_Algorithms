@@ -99,6 +99,12 @@ def health():
     }
 
 
+@app.head("/health")
+def health_head():
+    """HEAD endpoint for uptime monitoring."""
+    return
+
+
 @app.post("/predict")
 def predict(req: PredictionRequest):
     """ทำนายราคา BTC วันถัดไป"""
