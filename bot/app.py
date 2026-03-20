@@ -407,7 +407,7 @@ async def chat(req: ChatRequest) -> dict:
 			else:
 				return {"intent": "error", "answer": "ขออภัย ระบบพยากรณ์ไม่พร้อมใช้งาน"}
 			
-			answer = f"พยากรณ์ราคา BTC วันถัดไป ({pred['next_date']})\n"
+			answer = f"พยากรณ์ราคาปิด BTC วันถัดไป ({pred['next_date']})\n"
 			answer += f"ราคาที่คาด: ${pred['predicted_close']:,.2f} ({pred['predicted_change_pct']:+.2f}%)"
 			return {"intent": "predict", "answer": answer, "data": pred}
 
@@ -525,12 +525,12 @@ async def chat(req: ChatRequest) -> dict:
 				"Bitcoin (BTC) คืออะไร?\n\n"
 				"Bitcoin เป็นสกุลเงินดิจิทัล (Cryptocurrency) ชนิดแรกของโลก\n"
 				"สร้างขึ้นในปี 2009 โดย Satoshi Nakamoto\n\n"
-				" จุดเด่น:\n"
-				"🔹 ไม่มีธนาคารกลางควบคุม (Decentralized)\n"
-				"🔹 โอนเงินได้ทั่วโลกภายในนาที\n"
-				"🔹 มีจำนวนจำกัด 21 ล้าน BTC\n"
-				"🔹 ปลอดภัยด้วยเทคโนโลยี Blockchain\n\n"
-				"  ราคา BTC เปลี่ยนแปลงตลอดเวลา\n"
+				"จุดเด่น:\n"
+				"🔹ไม่มีธนาคารกลางควบคุม\n"
+				"🔹โอนเงินได้ทั่วโลกภายในนาที\n"
+				"🔹มีจำนวนจำกัด 21 ล้าน BTC\n"
+				"🔹ปลอดภัยด้วยเทคโนโลยี Blockchain\n\n"
+				"ราคา BTC เปลี่ยนแปลงตลอดเวลา\n"
 				"พิมพ์ 'ราคา' เพื่อดูราคาปัจจุบัน"
 			)
 			return {"intent": "btc_info", "answer": answer}
@@ -540,7 +540,7 @@ async def chat(req: ChatRequest) -> dict:
 			"คำสั่งที่ใช้ได้:\n\n"
 			"'ราคา'/'price' - ดูราคา BTC ปัจจุบัน + กราฟวันนี้\n"
 			"'กราฟ'/'chart' - ดูกราฟราคา BTC 30 วัน\n"
-			"'predict'/'พยากรณ์' - ทำนายราคาวันถัดไป (Chronos AI)\n"
+			"'predict'/'พยากรณ์' - ทำนายราคาวันถัดไป \n"
 			"'compare'/'เปรียบเทียบ' - เปรียบเทียบกลยุทธ์ทั้งหมด\n"
 			"'trend' - สัญญาณ Trend Following\n"
 			"'mean' - สัญญาณ Mean Reversion\n"
