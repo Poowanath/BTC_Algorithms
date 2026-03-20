@@ -427,18 +427,18 @@ async def chat(req: ChatRequest) -> dict:
 			return {"intent": "compare", "answer": answer, "data": cmp_data}
 
 		if "trend" in text:
-			# ใช้ HF API สำหรับ filter ถ้ามี
-			sig = await signal(strategy="trend", use_model_filter=req.use_model_filter, use_latest=True)
+			# ใช้ Chronos filter เพื่อความแม่นยำ
+			sig = await signal(strategy="trend", use_model_filter=True, use_latest=True)
 			answer = f"Trend Following\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคาปิด: ${sig['latest_close']:,.2f}\nข้อมูล ณ: {sig['latest_date']}"
 			return {"intent": "signal", "answer": answer, "data": sig}
 
 		if "mean" in text:
-			sig = await signal(strategy="mean_reversion", use_model_filter=req.use_model_filter, use_latest=True)
+			sig = await signal(strategy="mean_reversion", use_model_filter=True, use_latest=True)
 			answer = f"Mean Reversion\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคาปิด: ${sig['latest_close']:,.2f}\nข้อมูล ณ: {sig['latest_date']}"
 			return {"intent": "signal", "answer": answer, "data": sig}
 
 		if "grid" in text:
-			sig = await signal(strategy="grid", use_model_filter=req.use_model_filter, use_latest=True)
+			sig = await signal(strategy="grid", use_model_filter=True, use_latest=True)
 			answer = f"Grid Trading\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคาปิด: ${sig['latest_close']:,.2f}\nข้อมูล ณ: {sig['latest_date']}"
 			return {"intent": "signal", "answer": answer, "data": sig}
 

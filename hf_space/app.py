@@ -154,8 +154,9 @@ def predict_from_data(req: BatchPredictionRequest):
         if model_pipeline is None:
             raise HTTPException(status_code=503, detail="Model is still loading")
         
-        if len(req.prices) < 30:
-            raise HTTPException(status_code=400, detail="Not enough data (need at least 30 prices)")
+        # ลดข้อกำหนดจาก 30 เป็น 10 วัน
+        if len(req.prices) < 10:
+            raise HTTPException(status_code=400, detail="Not enough data (need at least 10 prices)")
         
         # ใช้ราคาที่ส่งมา
         if len(req.prices) < req.window_size:
