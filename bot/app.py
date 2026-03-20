@@ -565,12 +565,26 @@ async def line_webhook(request: Request, x_line_signature: str = Header(None)):
 
 
 @handler.add(MessageEvent, message=TextMessageContent)
-async def handle_text_message(event: MessageEvent):
+def handle_text_message(event: MessageEvent):
 	"""Handle text messages from LINE."""
 	if not LINE_CHANNEL_ACCESS_TOKEN:
 		return
 
 	user_message = event.message.text
+	
+	# Run async handler in event loop
+	import asyncio
+	try:
+		loop = asyncio.get_event_loop()
+	except RuntimeError:
+		loop = asyncio.new_event_loop()
+		asyncio.set_event_loop(loop)
+	
+	loop.run_until_complete(_handle_text_message_async(event, user_message))
+
+
+async def _handle_text_message_async(event: MessageEvent, user_message: str):
+	"""Async handler for text messages."""
 	
 	# ตรวจสอบว่าเป็นคำสั่ง "ราคา" หรือ "price"
 	if "ราคา" in user_message or "price" in user_message:
