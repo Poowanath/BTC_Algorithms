@@ -44,36 +44,46 @@ class StrategyService:
 	@staticmethod
 	def _get_current_signal(strategy_name: str, latest_row: pd.Series, signals: pd.DataFrame) -> str:
 		"""Get current signal based on current market condition, not last trade."""
-		if strategy_name == "trend":
-			# Check if short MA > long MA (uptrend = BUY signal)
-			if latest_row['short_mavg'] > latest_row['long_mavg']:
-				return "BUY"
-			elif latest_row['short_mavg'] < latest_row['long_mavg']:
-				return "SELL"
-			return "HOLD"
-		
-		elif strategy_name in {"mean", "mean_reversion"}:
-			# Check if price is at oversold/overbought zone
-			price = latest_row['Close']
-			lower_band = latest_row['Lower_Band']
-			upper_band = latest_row['Upper_Band']
+		try:
+			if strategy_name == "trend":
+				# Check if short MA > long MA (uptrend = BUY signal)
+				if 'short_mavg' not in latest_row or 'long_mavg' not in latest_row:
+					return "HOLD"
+				if latest_row['short_mavg'] > latest_row['long_mavg']:
+					return "BUY"
+				elif latest_row['short_mavg'] < latest_row['long_mavg']:
+					return "SELL"
+				return "HOLD"
 			
-			if price <= lower_band:
-				return "BUY"  # Oversold
-			elif price >= upper_band:
-				return "SELL"  # Overbought
+			elif strategy_name in {"mean", "mean_reversion"}:
+				# Check if price is at oversold/overbought zone
+				if 'Close' not in latest_row or 'Lower_Band' not in latest_row or 'Upper_Band' not in latest_row:
+					return "HOLD"
+				price = latest_row['Close']
+				lower_band = latest_row['Lower_Band']
+				upper_band = latest_row['Upper_Band']
+				
+				if price <= lower_band:
+					return "BUY"  # Oversold
+				elif price >= upper_band:
+					return "SELL"  # Overbought
+				return "HOLD"
+			
+			elif strategy_name == "grid":
+				# For grid, use the actual signal since it's based on crossing thresholds
+				if 'signal' not in latest_row:
+					return "HOLD"
+				signal_value = int(latest_row['signal'])
+				if signal_value == 1:
+					return "BUY"
+				elif signal_value == -1:
+					return "SELL"
+				return "HOLD"
+			
 			return "HOLD"
-		
-		elif strategy_name == "grid":
-			# For grid, use the actual signal since it's based on crossing thresholds
-			signal_value = int(latest_row['signal'])
-			if signal_value == 1:
-				return "BUY"
-			elif signal_value == -1:
-				return "SELL"
+		except Exception as e:
+			print(f"Error in _get_current_signal: {e}")
 			return "HOLD"
-		
-		return "HOLD"
 
 	async def _apply_lstm_filter(self, signals: pd.DataFrame, model_service, full_data: pd.DataFrame) -> pd.DataFrame:
 		"""Apply Chronos model filter to trading signals."""
