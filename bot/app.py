@@ -427,7 +427,7 @@ async def chat(req: ChatRequest) -> dict:
 			return {"intent": "compare", "answer": answer, "data": cmp_data}
 
 		if "trend" in text:
-			# ใช้ Chronos filter เพื่อความแม่นยำ
+			# ใช้ filter แต่จำกัดจำนวน API calls
 			sig = await signal(strategy="trend", use_model_filter=True, use_latest=True)
 			answer = f"Trend Following\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคาปิด: ${sig['latest_close']:,.2f}\nข้อมูล ณ: {sig['latest_date']}"
 			return {"intent": "signal", "answer": answer, "data": sig}

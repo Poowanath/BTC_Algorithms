@@ -91,11 +91,25 @@ class StrategyService:
 		
 		filtered = signals.copy()
 		filtered_count = 0
+		api_call_count = 0
+		max_api_calls = 50  # จำกัดไม่เกิน 50 ครั้ง
 
 		for i in range(len(filtered)):
 			signal = int(filtered["signal"].iloc[i])
 			if signal == 0:
 				continue
+			
+			# เช็คว่ามีการเปลี่ยนแปลงสัญญาณหรือไม่ (positions ≠ 0)
+			# ถ้าไม่เปลี่ยน = ไม่ต้อง filter
+			if i > 0:
+				prev_signal = int(filtered["signal"].iloc[i-1])
+				if signal == prev_signal:
+					continue  # ข้ามถ้าสัญญาณเหมือนเดิม
+			
+			# จำกัดจำนวนครั้งที่เรียก API
+			if api_call_count >= max_api_calls:
+				print(f"Reached max API calls limit ({max_api_calls})")
+				break
 
 			current_date = filtered.index[i]
 			current_price = float(filtered["Close"].iloc[i])
@@ -105,8 +119,10 @@ class StrategyService:
 			if hasattr(model_service, 'predict_from_dataframe'):
 				if asyncio.iscoroutinefunction(model_service.predict_from_dataframe):
 					predicted = await model_service.predict_from_dataframe(data_up_to_now)
+					api_call_count += 1
 				else:
 					predicted = model_service.predict_from_dataframe(data_up_to_now)
+					api_call_count += 1
 			else:
 				continue
 			
@@ -121,6 +137,7 @@ class StrategyService:
 				filtered.loc[current_date, "signal"] = 0
 				filtered_count += 1
 		
+		print(f"Filter: {filtered_count} signals filtered, {api_call_count} API calls made")
 		return filtered
 
 	async def run_strategy(self, name: str, data: pd.DataFrame, use_model_filter: bool = False, model_service=None, full_data: pd.DataFrame = None) -> Dict:
