@@ -540,11 +540,11 @@ async def chat(req: ChatRequest) -> dict:
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def _process_chat_message(text: str, use_model_filter: bool = True) -> str:  # เปิดใช้ Chronos filter เป็นค่า default
+async def _process_chat_message(text: str, use_model_filter: bool = True) -> str:  # เปิดใช้ Chronos filter เป็นค่า default
 	"""Process chat message and return answer text."""
 	try:
 		req = ChatRequest(message=text, use_model_filter=use_model_filter)
-		result = chat(req)
+		result = await chat(req)
 		return result["answer"]
 	except Exception as exc:
 		return f"เกิดข้อผิดพลาด: {str(exc)}"
@@ -565,7 +565,7 @@ async def line_webhook(request: Request, x_line_signature: str = Header(None)):
 
 
 @handler.add(MessageEvent, message=TextMessageContent)
-def handle_text_message(event: MessageEvent):
+async def handle_text_message(event: MessageEvent):
 	"""Handle text messages from LINE."""
 	if not LINE_CHANNEL_ACCESS_TOKEN:
 		return
@@ -704,7 +704,7 @@ def handle_text_message(event: MessageEvent):
 			)
 		
 		# ประมวลผลและส่งผลลัพธ์
-		reply_text = _process_chat_message(user_message, use_model_filter=True)
+		reply_text = await _process_chat_message(user_message, use_model_filter=True)
 		
 		# ส่งผลลัพธ์ (ใช้ push message เพราะ reply token ใช้ไปแล้ว)
 		with ApiClient(configuration) as api_client:
@@ -718,7 +718,7 @@ def handle_text_message(event: MessageEvent):
 		return
 	
 	# ข้อความปกติ
-	reply_text = _process_chat_message(user_message, use_model_filter=True)  # เปิดใช้ Chronos filter
+	reply_text = await _process_chat_message(user_message, use_model_filter=True)  # เปิดใช้ Chronos filter
 
 	with ApiClient(configuration) as api_client:
 		line_bot_api = MessagingApi(api_client)
