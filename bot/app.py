@@ -102,6 +102,104 @@ def health_head():
 	return
 
 
+# เก็บสัญญาณล่าสุดของ Mean Reversion
+last_mean_signal = {"signal": "HOLD", "price": 0, "checked_at": None}
+
+
+@app.get("/check-mean-signal")
+async def check_mean_signal():
+	"""เช็คสัญญาณ Mean Reversion และแจ้งเตือนถ้าเปลี่ยน"""
+	global last_mean_signal
+	
+	try:
+		# เช็คสัญญาณ Mean Reversion (ไม่ใช้ filter เพื่อความเร็ว)
+		sig = await signal(strategy="mean_reversion", use_model_filter=False, use_latest=True)
+		current_signal = sig['latest_signal']
+		current_price = sig['latest_close']
+		
+		# ตรวจสอบว่าสัญญาณเปลี่ยนหรือไม่
+		signal_changed = last_mean_signal["signal"] != current_signal
+		is_trading_signal = current_signal in ["BUY", "SELL"]
+		
+		# ถ้าสัญญาณเปลี่ยนเป็น BUY หรือ SELL
+		if signal_changed and is_trading_signal:
+			from datetime import datetime
+			import pytz
+			bangkok_tz = pytz.timezone('Asia/Bangkok')
+			current_time = datetime.now(bangkok_tz).strftime('%H:%M:%S')
+			
+			message = (
+				f"🚨 Mean Reversion Alert!\n\n"
+				f"สัญญาณ: {current_signal}\n"
+				f"ราคา: ${current_price:,.2f}\n"
+				f"เวลา: {current_time}\n"
+				f"วันที่: {sig['latest_date']}"
+			)
+			
+			# ส่ง LINE notification ไปหาคุณ
+			# ต้องใส่ LINE User ID ของคุณ
+			USER_ID = os.getenv("LINE_USER_ID", "")
+			
+			if USER_ID and LINE_CHANNEL_ACCESS_TOKEN:
+				try:
+					with ApiClient(configuration) as api_client:
+						line_bot_api = MessagingApi(api_client)
+						line_bot_api.push_message(
+							PushMessageRequest(
+								to=USER_ID,
+								messages=[TextMessage(text=message)]
+							)
+						)
+					
+					notification_sent = True
+				except Exception as e:
+					print(f"Failed to send LINE notification: {e}")
+					notification_sent = False
+			else:
+				notification_sent = False
+			
+			# อัพเดตสัญญาณล่าสุด
+			last_mean_signal = {
+				"signal": current_signal,
+				"price": current_price,
+				"checked_at": datetime.now(bangkok_tz).isoformat()
+			}
+			
+			return {
+				"status": "signal_changed",
+				"previous_signal": last_mean_signal["signal"],
+				"current_signal": current_signal,
+				"price": current_price,
+				"notification_sent": notification_sent,
+				"message": message
+			}
+		
+		# ถ้าสัญญาณไม่เปลี่ยน
+		else:
+			from datetime import datetime
+			import pytz
+			bangkok_tz = pytz.timezone('Asia/Bangkok')
+			
+			last_mean_signal = {
+				"signal": current_signal,
+				"price": current_price,
+				"checked_at": datetime.now(bangkok_tz).isoformat()
+			}
+			
+			return {
+				"status": "no_change",
+				"current_signal": current_signal,
+				"price": current_price,
+				"checked_at": last_mean_signal["checked_at"]
+			}
+	
+	except Exception as e:
+		return {
+			"status": "error",
+			"error": str(e)
+		}
+
+
 @app.get("/price-chart")
 def price_chart(
 	days: int = Query(30, description="Number of days to show (default: 30)"),
