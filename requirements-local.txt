@@ -1,14 +1,17 @@
-# สำหรับ deploy บน Render (ไม่มี ML models - ใช้ HF API)
+# สำหรับรัน local (มี ML models)
 fastapi
 uvicorn[standard]
-gunicorn
 pydantic
 pandas
 numpy
 yfinance
+joblib
+tensorflow
 matplotlib
 scikit-learn
 line-bot-sdk
 python-dotenv
 httpx
 pytz
+torch
+chronos-forecasting

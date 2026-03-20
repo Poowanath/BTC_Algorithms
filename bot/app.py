@@ -20,8 +20,9 @@ from linebot.v3.messaging import (
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
-from bot.services.chronos_service import ChronosService
+from bot.services.data_service import DataService
 from bot.services.strategy_service import StrategyService
+from bot.services.hf_prediction_service import HFPredictionService
 
 # Load environment variables
 load_dotenv()
@@ -29,8 +30,22 @@ load_dotenv()
 app = FastAPI(title="BTC Trading Bot API", version="1.0.0")
 DEFAULT_START_DATE = "2020-01-01"
 
-# ใช้ Chronos เป็น default
-model_service = ChronosService(model_name="amazon/chronos-t5-tiny", window_size=256)
+# Data service (ไม่ต้องใช้ ML model)
+data_service = DataService()
+
+# เลือกใช้ Chronos local หรือ HF API สำหรับ prediction
+HF_API_URL = os.getenv("HF_PREDICTION_API_URL", "")
+
+if HF_API_URL:
+	print(f"🌐 Using Hugging Face Prediction API: {HF_API_URL}")
+	hf_prediction_service = HFPredictionService(HF_API_URL)
+	prediction_service = None
+else:
+	print("🤖 Using local Chronos model")
+	from bot.services.chronos_service import ChronosService
+	prediction_service = ChronosService(model_name="amazon/chronos-t5-tiny", window_size=256)
+	hf_prediction_service = None
+
 strategy_service = StrategyService()
 
 # LINE Bot Configuration
@@ -102,7 +117,7 @@ def price_chart(
 		from datetime import datetime
 		
 		# Get data
-		data = model_service.get_latest_btc_data(days=days + 10)  # Get extra days for safety
+		data = data_service.get_latest_btc_data(days=days + 10)  # Get extra days for safety
 		
 		if len(data) < days:
 			raise HTTPException(status_code=400, detail=f"Not enough data. Requested {days} days, got {len(data)}")
@@ -236,21 +251,28 @@ def intraday_chart(
 
 
 @app.get("/predict")
-def predict() -> dict:
+async def predict() -> dict:
 	try:
-		return model_service.predict_next_day()
+		if hf_prediction_service:
+			# ใช้ HF API
+			return await hf_prediction_service.predict_next_day(start_date=DEFAULT_START_DATE)
+		elif prediction_service:
+			# ใช้ local model
+			return prediction_service.predict_next_day()
+		else:
+			raise HTTPException(status_code=503, detail="No prediction service available")
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/signal")
-def signal(
+async def signal(
 	strategy: str = Query("trend", description="trend | mean_reversion | grid"),
 	use_model_filter: bool = Query(True),  # เปิดใช้ Chronos filter เป็นค่า default
 	use_latest: bool = Query(True, description="Use latest real-time data instead of test split"),
 ) -> dict:
 	try:
-		data_full = model_service.get_latest_btc_data(start=DEFAULT_START_DATE)
+		data_full = data_service.get_latest_btc_data(start=DEFAULT_START_DATE)
 		
 		if use_latest:
 			# Use all available data for real-time signal
@@ -272,11 +294,11 @@ def signal(
 				"test_rows": len(data),
 			}
 
-		result = strategy_service.run_strategy(
+		result = await strategy_service.run_strategy(
 			name=strategy,
 			data=data,
 			use_model_filter=use_model_filter,
-			model_service=model_service,  # ส่ง model_service เสมอเพื่อให้ได้ราคาปัจจุบัน
+			model_service=hf_prediction_service if hf_prediction_service else data_service,
 		)
 		result["data_scope"] = data_scope
 		return result
@@ -287,7 +309,7 @@ def signal(
 
 
 @app.get("/compare")
-def compare(
+async def compare(
 	use_model_filter: bool = Query(True),  # เปิดใช้ Chronos filter เป็นค่า default
 ) -> dict:
 	try:
@@ -323,7 +345,7 @@ def compare(
 				if len(intraday_data) > 0:
 					current_price = float(intraday_data['Close'].iloc[-1])
 				else:
-					price_data = model_service.get_current_price()
+					price_data = data_service.get_current_price()
 					current_price = float(price_data.get("current_price", 0))
 			except Exception:
 				current_price = 0
@@ -339,16 +361,16 @@ def compare(
 			return result
 		else:
 			# ถ้าไม่มี CSV ให้รัน backtesting แบบเดิม
-			data_full = model_service.get_latest_btc_data(start=DEFAULT_START_DATE)
+			data_full = data_service.get_latest_btc_data(start=DEFAULT_START_DATE)
 			data = _select_test_split(data_full)
 			
 			if len(data) < 30:
 				raise ValueError("Not enough data in test split for configured date range.")
 
-			result = strategy_service.compare_all(
+			result = await strategy_service.compare_all(
 				data=data,
 				use_model_filter=use_model_filter,
-				model_service=model_service,
+				model_service=hf_prediction_service if hf_prediction_service else data_service,
 				full_data=data_full,
 			)
 			result["data_scope"] = {
@@ -367,7 +389,7 @@ def compare(
 
 
 @app.post("/chat")
-def chat(req: ChatRequest) -> dict:
+async def chat(req: ChatRequest) -> dict:
 	text = req.message.strip().lower()
 	
 	# Get current time for display
@@ -378,28 +400,20 @@ def chat(req: ChatRequest) -> dict:
 
 	try:
 		if "predict" in text or "พยากรณ์" in text:
-			pred = model_service.predict_next_day()
+			if hf_prediction_service:
+				pred = await hf_prediction_service.predict_next_day(start_date=DEFAULT_START_DATE)
+			elif prediction_service:
+				pred = prediction_service.predict_next_day()
+			else:
+				return {"intent": "error", "answer": "ขออภัย ระบบพยากรณ์ไม่พร้อมใช้งาน"}
+			
 			answer = f"พยากรณ์ราคา BTC วันถัดไป ({pred['next_date']})\n"
-			answer += f"ราคาที่คาด: ${pred['predicted_close']:,.2f} ({pred['predicted_change_pct']:+.2f}%)\n"
-			
-			# Add accuracy info if available
-			if pred.get('accuracy', {}).get('available'):
-				acc = pred['accuracy']
-				answer += f"\nความแม่นยำโมเดล:\n"
-				answer += f"ทายทิศทางถูก: {acc['direction_accuracy_pct']:.0f}%\n"
-				answer += f"(จากการทดสอบ {acc['test_days']} วันล่าสุด)\n"
-			return {"intent": "predict", "answer": answer, "data": pred}
-			
-			# Add accuracy info if available
-			if pred.get('accuracy', {}).get('available'):
-				acc = pred['accuracy']
-				answer += f"\nความแม่นยำโมเดล:\n"
-				answer += f"ทายทิศทางถูก: {acc['direction_accuracy_pct']:.0f}%\n"
-				answer += f"(จากการทดสอบ {acc['test_days']} วันล่าสุด)\n"
+			answer += f"ราคาที่คาด: ${pred['predicted_close']:,.2f} ({pred['predicted_change_pct']:+.2f}%)"
 			return {"intent": "predict", "answer": answer, "data": pred}
 
 		if "compare" in text or "เปรียบเทียบ" in text:
-			cmp_data = compare(use_model_filter=req.use_model_filter)
+			# ใช้ HF API สำหรับ filter ถ้ามี
+			cmp_data = await compare(use_model_filter=req.use_model_filter)
 			best = cmp_data["best_strategy"]
 			answer = f"เปรียบเทียบกลยุทธ์ทั้งหมด\n"
 			answer += f"กลยุทธ์ที่ดีที่สุด: {best['strategy']}\n"
@@ -413,23 +427,24 @@ def chat(req: ChatRequest) -> dict:
 			return {"intent": "compare", "answer": answer, "data": cmp_data}
 
 		if "trend" in text:
-			sig = signal(strategy="trend", use_model_filter=req.use_model_filter, use_latest=True)
-			answer = f"Trend Following\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคา: ${sig['latest_close']:,.2f}\nข้อมูล ณ: {sig['latest_date']}"
+			# ใช้ HF API สำหรับ filter ถ้ามี
+			sig = await signal(strategy="trend", use_model_filter=req.use_model_filter, use_latest=True)
+			answer = f"Trend Following\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคาปิด: ${sig['latest_close']:,.2f}\nข้อมูล ณ: {sig['latest_date']}"
 			return {"intent": "signal", "answer": answer, "data": sig}
 
 		if "mean" in text:
-			sig = signal(strategy="mean_reversion", use_model_filter=req.use_model_filter, use_latest=True)
-			answer = f"Mean Reversion\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคา: ${sig['latest_close']:,.2f}\nข้อมูล ณ: {sig['latest_date']}"
+			sig = await signal(strategy="mean_reversion", use_model_filter=req.use_model_filter, use_latest=True)
+			answer = f"Mean Reversion\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคาปิด: ${sig['latest_close']:,.2f}\nข้อมูล ณ: {sig['latest_date']}"
 			return {"intent": "signal", "answer": answer, "data": sig}
 
 		if "grid" in text:
-			sig = signal(strategy="grid", use_model_filter=req.use_model_filter, use_latest=True)
-			answer = f"Grid Trading\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคา: ${sig['latest_close']:,.2f}\nข้อมูล ณ: {sig['latest_date']}"
+			sig = await signal(strategy="grid", use_model_filter=req.use_model_filter, use_latest=True)
+			answer = f"Grid Trading\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคาปิด: ${sig['latest_close']:,.2f}\nข้อมูล ณ: {sig['latest_date']}"
 			return {"intent": "signal", "answer": answer, "data": sig}
 
 		if "ราคา" in text or "price" in text:
 			try:
-				price_data = model_service.get_current_price()
+				price_data = data_service.get_current_price()
 				if price_data.get("current_price"):
 					answer = f"ราคา BTC ตอนนี้: ${price_data['current_price']:,.2f}"
 					
@@ -451,7 +466,7 @@ def chat(req: ChatRequest) -> dict:
 			except Exception as e:
 				# Fallback: ใช้ราคาจาก historical data แทน
 				try:
-					data = model_service.get_latest_btc_data(start=DEFAULT_START_DATE)
+					data = data_service.get_latest_btc_data(start=DEFAULT_START_DATE)
 					latest_price = float(data['Close'].iloc[-1])
 					latest_date = data.index[-1].strftime('%Y-%m-%d')
 					answer = f"ราคา BTC: ${latest_price:,.2f}\nข้อมูล ณ: {latest_date}"
@@ -474,7 +489,21 @@ def chat(req: ChatRequest) -> dict:
 			answer = f"กราฟราคา BTC ย้อนหลัง 30 วัน\n{chart_url}"
 			return {"intent": "chart", "answer": answer, "chart_url": chart_url}
 
-		if "อธิบาย" in text or "info" in text or "กลยุทธ์คืออะไร" in text or "มีอะไรบ้าง" in text or "หลักการ":
+		if "help" in text or "ช่วยเหลือ" in text:
+			help_text = (
+				"คำสั่งที่ใช้ได้:\n\n"
+				"'ราคา'/'price' - ดูราคา BTC ปัจจุบัน + กราฟวันนี้\n"
+				"'กราฟ'/'chart' - ดูกราฟราคา BTC 30 วัน\n"
+				"'predict'/'พยากรณ์' - ทำนายราคาวันถัดไป\n"
+				"'compare'/'เปรียบเทียบ' - เปรียบเทียบกลยุทธ์ทั้งหมด\n"
+				"'trend' - สัญญาณ Trend Following\n"
+				"'mean' - สัญญาณ Mean Reversion\n"
+				"'grid' - สัญญาณ Grid Trading\n"
+				"'info'/'อธิบาย' - อธิบายกลยุทธ์การเทรด"
+			)
+			return {"intent": "help", "answer": help_text}
+
+		if "อธิบาย" in text or "info" in text or "กลยุทธ์คืออะไร" in text or "มีอะไรบ้าง" in text or "หลักการ" in text:
 			answer = (
 				"กลยุทธ์การเทรด\n\n"
 				"🔹 Trend Following\n"
@@ -487,7 +516,7 @@ def chat(req: ChatRequest) -> dict:
 				"🔹 Grid Trading\n"
 				"ตั้งราคาซื้อ-ขายเป็นช่วงๆ แบบตาราง\n"
 				"ซื้อเมื่อราคาลง ขายเมื่อราคาขึ้น\n"
-				"เหมาะกับตลาดที่ไซด์เวย์\n\n"
+				"เหมาะกับตลาดที่ไซด์เวย์"
 			)
 			return {"intent": "info", "answer": answer}
 
@@ -581,7 +610,7 @@ def handle_text_message(event: MessageEvent):
 			except Exception:
 				# Fallback: ใช้ราคาจาก historical data
 				try:
-					data = model_service.get_latest_btc_data(start=DEFAULT_START_DATE)
+					data = data_service.get_latest_btc_data(start=DEFAULT_START_DATE)
 					latest_price = float(data['Close'].iloc[-1])
 					latest_date = data.index[-1].strftime('%Y-%m-%d')
 					price_text = f"ราคา BTC: ${latest_price:,.2f}\nข้อมูล ณ: {latest_date}"

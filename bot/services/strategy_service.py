@@ -75,8 +75,10 @@ class StrategyService:
 		
 		return "HOLD"
 
-	def _apply_lstm_filter(self, signals: pd.DataFrame, model_service, full_data: pd.DataFrame) -> pd.DataFrame:
+	async def _apply_lstm_filter(self, signals: pd.DataFrame, model_service, full_data: pd.DataFrame) -> pd.DataFrame:
 		"""Apply Chronos model filter to trading signals."""
+		import asyncio
+		
 		filtered = signals.copy()
 		filtered_count = 0
 
@@ -89,7 +91,15 @@ class StrategyService:
 			current_price = float(filtered["Close"].iloc[i])
 			data_up_to_now = full_data[full_data.index <= current_date]
 
-			predicted = model_service.predict_from_dataframe(data_up_to_now)
+			# ตรวจสอบว่า model_service มี predict_from_dataframe แบบ async หรือไม่
+			if hasattr(model_service, 'predict_from_dataframe'):
+				if asyncio.iscoroutinefunction(model_service.predict_from_dataframe):
+					predicted = await model_service.predict_from_dataframe(data_up_to_now)
+				else:
+					predicted = model_service.predict_from_dataframe(data_up_to_now)
+			else:
+				continue
+			
 			if predicted is None:
 				continue
 
@@ -103,7 +113,7 @@ class StrategyService:
 		
 		return filtered
 
-	def run_strategy(self, name: str, data: pd.DataFrame, use_model_filter: bool = False, model_service=None, full_data: pd.DataFrame = None) -> Dict:
+	async def run_strategy(self, name: str, data: pd.DataFrame, use_model_filter: bool = False, model_service=None, full_data: pd.DataFrame = None) -> Dict:
 		"""
 		Run strategy with optional Chronos filter.
 		
@@ -151,7 +161,7 @@ class StrategyService:
 				raise ValueError("model_service is required when use_model_filter=True")
 			# ใช้ full_data สำหรับ Chronos filter เพื่อให้มีข้อมูลพอ
 			filter_data = full_data if full_data is not None else data
-			signals = self._apply_lstm_filter(signals, model_service, filter_data)
+			signals = await self._apply_lstm_filter(signals, model_service, filter_data)
 
 		backtest = BacktestEngine(initial_capital=10000, commission=0.001)
 		portfolio, trades = backtest.run_backtest(signals)
@@ -205,7 +215,7 @@ class StrategyService:
 		}
 		return response
 
-	def compare_all(self, data: pd.DataFrame, use_model_filter: bool = False, model_service=None, full_data: pd.DataFrame = None) -> Dict:
+	async def compare_all(self, data: pd.DataFrame, use_model_filter: bool = False, model_service=None, full_data: pd.DataFrame = None) -> Dict:
 		"""
 		Compare all strategies.
 		
@@ -220,9 +230,9 @@ class StrategyService:
 			full_data = data
 			
 		results = {
-			"trend": self.run_strategy("trend", data, use_model_filter, model_service, full_data),
-			"mean_reversion": self.run_strategy("mean_reversion", data, use_model_filter, model_service, full_data),
-			"grid": self.run_strategy("grid", data, use_model_filter, model_service, full_data),
+			"trend": await self.run_strategy("trend", data, use_model_filter, model_service, full_data),
+			"mean_reversion": await self.run_strategy("mean_reversion", data, use_model_filter, model_service, full_data),
+			"grid": await self.run_strategy("grid", data, use_model_filter, model_service, full_data),
 		}
 
 		ranking = sorted(
