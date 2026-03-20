@@ -37,6 +37,19 @@ class HFPredictionService:
             # แปลง DataFrame เป็น list ของราคา
             prices = data['Close'].values.tolist()
             
+            # ตรวจสอบว่ามีข้อมูลพอ
+            if len(prices) < 10:
+                print(f"Not enough prices: {len(prices)}")
+                return None
+            
+            # กรอง NaN และ Inf
+            import math
+            prices = [p for p in prices if not (math.isnan(p) or math.isinf(p))]
+            
+            if len(prices) < 10:
+                print(f"Not enough valid prices after filtering: {len(prices)}")
+                return None
+            
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
                     f"{self.api_url}/predict_from_data",
@@ -49,11 +62,14 @@ class HFPredictionService:
                 result = response.json()
                 return result.get("predicted_price")
         except httpx.TimeoutException:
-            raise Exception("Prediction API timeout")
+            print("Prediction API timeout")
+            return None
         except httpx.HTTPStatusError as e:
-            raise Exception(f"Prediction API error: {e.response.status_code}")
+            print(f"Prediction API error: {e.response.status_code} - {e.response.text}")
+            return None
         except Exception as e:
-            raise Exception(f"Failed to predict from dataframe: {str(e)}")
+            print(f"Failed to predict from dataframe: {str(e)}")
+            return None
     
     async def health_check(self) -> dict:
         """ตรวจสอบสถานะ API"""
