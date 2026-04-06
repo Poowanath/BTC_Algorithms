@@ -442,8 +442,7 @@ async def chat(req: ChatRequest) -> dict:
 			answer = f"Grid Trading\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคาปิด: ${sig['latest_close']:,.2f}\nข้อมูล ณ: {sig['latest_date']}"
 			return {"intent": "signal", "answer": answer, "data": sig}
 
-		if "ราคา" in text or "price" in text or "btc price" in text or "btcprice" in text or "ราคาbtc" in text or "ราคาบิดคอยน์" 
-		in text or "ราคาบิทคอยน์" in text or "Bitcoin price" in text or "ราคา btc" in text:
+		if "ราคา" in text or "price" in text or "btc price" in text or "btcprice" in text or "ราคาbtc" in text or "ราคาบิดคอยน์" in text or "ราคาบิทคอยน์" in text or "Bitcoin price" in text or "ราคา btc" in text:
 			try:
 				price_data = data_service.get_current_price()
 				if price_data.get("current_price"):
