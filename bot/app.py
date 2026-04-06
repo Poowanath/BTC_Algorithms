@@ -399,7 +399,7 @@ async def chat(req: ChatRequest) -> dict:
 	current_time = datetime.now(bangkok_tz).strftime('%Y-%m-%d %H:%M:%S')
 
 	try:
-		if "predict" in text or "พยากรณ์" in text:
+		if "predict" in text or "พยากรณ์" in text or "ทำนาย" in text or "พยากรณ์ราคา" in text:
 			if hf_prediction_service:
 				pred = await hf_prediction_service.predict_next_day(start_date=DEFAULT_START_DATE)
 			elif prediction_service:
@@ -411,7 +411,7 @@ async def chat(req: ChatRequest) -> dict:
 			answer += f"ราคาที่คาด: ${pred['predicted_close']:,.2f} ({pred['predicted_change_pct']:+.2f}%)"
 			return {"intent": "predict", "answer": answer, "data": pred}
 
-		if "compare" in text or "เปรียบเทียบ" in text:
+		if "compare" in text or "เปรียบเทียบ" in text or "เปรียบเทียบทั้งหมด" in text or "เปรียบเทียบกลยุทธ์" in text:
 			# ใช้ HF API สำหรับ filter ถ้ามี
 			cmp_data = await compare(use_model_filter=req.use_model_filter)
 			best = cmp_data["best_strategy"]
@@ -438,11 +438,12 @@ async def chat(req: ChatRequest) -> dict:
 			return {"intent": "signal", "answer": answer, "data": sig}
 
 		if "grid" in text:
-			sig = await signal(strategy="grid", use_model_filter=True, use_latest=True)
+			sig = await signal(strategy="grid", use_model_filter=True, use_latest=False)
 			answer = f"Grid Trading\nวันนี้สัญญาณ: {sig['latest_signal']}\nราคาปิด: ${sig['latest_close']:,.2f}\nข้อมูล ณ: {sig['latest_date']}"
 			return {"intent": "signal", "answer": answer, "data": sig}
 
-		if "ราคา" in text or "price" in text:
+		if "ราคา" in text or "price" in text or "btc price" in text or "btcprice" in text or "ราคาbtc" in text or "ราคาบิดคอยน์" 
+		in text or "ราคาบิทคอยน์" in text or "Bitcoin price" in text or "ราคา btc" in text:
 			try:
 				price_data = data_service.get_current_price()
 				if price_data.get("current_price"):
@@ -479,7 +480,7 @@ async def chat(req: ChatRequest) -> dict:
 						answer = "ไม่สามารถดึงข้อมูลราคาได้ในขณะนี้ กรุณาลองใหม่ภายหลัง"
 					return {"intent": "price", "answer": answer}
 
-		if "กราฟ" in text or "chart" in text:
+		if "กราฟbtc" in text or "chart" in text or "กราฟ" in text or "กราฟบิทคอยน์" in text or "กราฟบิตคอยน์" in text:
 			# ส่งกราฟราคา BTC
 			# ต้องมี public URL สำหรับ LINE Bot
 			import os
@@ -499,7 +500,8 @@ async def chat(req: ChatRequest) -> dict:
 				"'trend' - สัญญาณ Trend Following\n"
 				"'mean' - สัญญาณ Mean Reversion\n"
 				"'grid' - สัญญาณ Grid Trading\n"
-				"'info'/'อธิบาย' - อธิบายกลยุทธ์การเทรด"
+				"'info'/'อธิบาย' - อธิบายกลยุทธ์การเทรด\n"
+				"'btc' - ข้อมูลเกี่ยวกับ Bitcoin"
 			)
 			return {"intent": "help", "answer": help_text}
 
@@ -520,7 +522,7 @@ async def chat(req: ChatRequest) -> dict:
 			)
 			return {"intent": "info", "answer": answer}
 
-		if "btc คืออะไร" in text or "bitcoin คืออะไร" in text or "btc" == text:
+		if "btc คืออะไร" in text or "bitcoin คืออะไร" in text or "btc" in text or "bitcoinคืออะไร" == text:
 			answer = (
 				"Bitcoin (BTC) คืออะไร?\n\n"
 				"Bitcoin เป็นสกุลเงินดิจิทัล (Cryptocurrency) ชนิดแรกของโลก\n"
@@ -546,7 +548,7 @@ async def chat(req: ChatRequest) -> dict:
 			"'mean' - สัญญาณ Mean Reversion\n"
 			"'grid' - สัญญาณ Grid Trading\n"
 			"'อธิบาย'/'info' - อธิบายกลยุทธ์การเทรด\n"
-			"'btc คืออะไร' - ข้อมูลเกี่ยวกับ Bitcoin"
+			"'btc' - ข้อมูลเกี่ยวกับ Bitcoin"
 		)
 		return {"intent": "help", "answer": help_text}
 

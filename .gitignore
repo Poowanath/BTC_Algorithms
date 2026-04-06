@@ -9,3 +9,5 @@ __pycache__/
 !results_with_chronos.csv
 picture/
 Backup/
+
+USER_MANUAL.md

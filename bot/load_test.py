@@ -9,13 +9,16 @@ from typing import List, Dict
 import httpx
 
 # Configuration
-BASE_URL = "http://localhost:8000"  # Change to your Render URL for production test
+BASE_URL = "https://btc-algorithms.onrender.com"  # Change to localhost for local test
 ENDPOINTS = [
     "/health",
+    "/price-chart?days=30",
+    "/intraday-chart?interval=5m", 
     "/predict",
     "/signal?strategy=trend",
     "/signal?strategy=mean_reversion",
     "/signal?strategy=grid",
+    "/compare",
 ]
 
 
@@ -23,7 +26,7 @@ async def make_request(client: httpx.AsyncClient, endpoint: str) -> Dict:
     """Make a single request and measure response time."""
     start_time = time.time()
     try:
-        response = await client.get(f"{BASE_URL}{endpoint}", timeout=30.0)
+        response = await client.get(f"{BASE_URL}{endpoint}", timeout=60.0)
         elapsed = time.time() - start_time
         return {
             "endpoint": endpoint,
@@ -151,24 +154,31 @@ def analyze_results(results: List[Dict], total_time: float):
 async def main():
     """Run multiple load tests with increasing users."""
     print("BTC Trading Bot - Load Testing")
+    print(f"Testing: {BASE_URL}")
+    print("Testing endpoints: /health, /price, /chart, /predict, /signal/*, /compare")
     print("Make sure the server is running!")
+    print("\nNote: Some endpoints may be slower due to:")
+    print("  - /predict: Calls HF Space API")
+    print("  - /signal/*: May call HF Space for filtering")
+    print("  - /chart: Generates images")
+    print()
     
-    # Test scenarios
+    # Test scenarios - ลดจำนวนลงเพราะ endpoints หนักขึ้น
     scenarios = [
-        (1, 5),    # 1 user, 5 requests
-        (5, 5),    # 5 users, 5 requests each
-        (10, 5),   # 10 users, 5 requests each
-        (20, 3),   # 20 users, 3 requests each
-        (50, 2),   # 50 users, 2 requests each (stress test)
+        (1, 2),    # 1 user, 2 requests (warm up)
+        (3, 2),    # 3 users, 2 requests each
+        (5, 2),    # 5 users, 2 requests each
+        (10, 2),   # 10 users, 2 requests each (realistic load)
+        (15, 2),   # 15 users, 2 requests each (stress test)
     ]
     
     for num_users, requests_per_user in scenarios:
         await load_test(num_users, requests_per_user)
         
         # Wait between tests
-        if num_users < 50:
-            print("Waiting 5 seconds before next test...\n")
-            await asyncio.sleep(5)
+        if num_users < 15:
+            print("Waiting 15 seconds before next test...\n")
+            await asyncio.sleep(15)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# สำหรับ deploy บน Render (ไม่มี ML models - ใช้ HF API)
+# สำหรับ deploy บน Render
 fastapi
 uvicorn[standard]
 gunicorn
